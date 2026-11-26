@@ -28,6 +28,11 @@ app.use(express.json({ limit: '2mb' }));
 app.get('/health', (_req, res) =>
   res.json({ ok: true, hasToken: !!BOT_TOKEN, hasMC: !!MANYCHAT_WEBHOOK_URL, hasIngest: !!INGEST_URL }));
 
+// DEBUG ring buffer of the last few updates + what we did with them
+const DEBUG = [];
+function dbg(o) { DEBUG.unshift({ t: new Date().toISOString(), ...o }); if (DEBUG.length > 15) DEBUG.pop(); }
+app.get('/debug', (req, res) => { if (req.query.key !== 'clawd26') return res.status(403).json({}); res.json(DEBUG); });
+
 // pull a downloadable file_id + type out of a Telegram message (largest photo size, voice, video, etc.)
 function extractMedia(msg) {
   if (!msg) return null;
@@ -48,9 +53,10 @@ async function sendMediaToSetter(update) {
     if (!INGEST_URL) return;
     const msg = update.message || update.edited_message || update.channel_post;
     const media = extractMedia(msg);
+    dbg({ keys: msg ? Object.keys(msg) : null, media });
     if (!media) return;
     const from = (msg && msg.from) || {};
-    await fetch(INGEST_URL, {
+    const r = await fetch(INGEST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -64,7 +70,8 @@ async function sendMediaToSetter(update) {
         t: ((msg && msg.date) || Math.floor(Date.now() / 1000)) * 1000,
       }),
     });
-  } catch (e) { console.error('[media] ingest failed:', e.message); }
+    dbg({ ingest_status: r.status, sid: String(from.id || '') });
+  } catch (e) { dbg({ ingest_error: e.message }); console.error('[media] ingest failed:', e.message); }
 }
 
 app.post('/tg/:secret', async (req, res) => {
