@@ -1,0 +1,9 @@
+{
+  "name": "ffc-tg-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram webhook proxy in front of ManyChat for the FFC setter bot — forwards to ManyChat + pulls media to the setter dashboard.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.19.2" }
+}
