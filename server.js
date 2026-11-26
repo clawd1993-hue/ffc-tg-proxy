@@ -47,31 +47,28 @@ function extractMedia(msg) {
   return null;
 }
 
-// best-effort: tell the setter app a lead sent media (never throws into the hot path)
-async function sendMediaToSetter(update) {
+// best-effort: tell the setter app about EVERY message — text (to link the person's
+// Telegram id to their ManyChat convo) and media (to show it). Never throws into the hot path.
+async function sendToSetter(update) {
   try {
     if (!INGEST_URL) return;
     const msg = update.message || update.edited_message || update.channel_post;
+    if (!msg) return;
+    const from = msg.from || {};
     const media = extractMedia(msg);
-    dbg({ keys: msg ? Object.keys(msg) : null, media });
-    if (!media) return;
-    const from = (msg && msg.from) || {};
-    const r = await fetch(INGEST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subscriber_id: String(from.id || (msg.chat && msg.chat.id) || ''),
-        name: [from.first_name, from.last_name].filter(Boolean).join(' '),
-        username: from.username || '',
-        type: media.type,
-        file_id: media.file_id,
-        file_name: media.name || '',
-        caption: (msg && msg.caption) || '',
-        t: ((msg && msg.date) || Math.floor(Date.now() / 1000)) * 1000,
-      }),
-    });
-    dbg({ ingest_status: r.status, sid: String(from.id || '') });
-  } catch (e) { dbg({ ingest_error: e.message }); console.error('[media] ingest failed:', e.message); }
+    const text = msg.text || msg.caption || '';
+    if (!media && !text) return; // nothing useful (e.g. service message)
+    const body = {
+      subscriber_id: String(from.id || (msg.chat && msg.chat.id) || ''),
+      name: [from.first_name, from.last_name].filter(Boolean).join(' '),
+      username: from.username || '',
+      text,
+      t: ((msg && msg.date) || Math.floor(Date.now() / 1000)) * 1000,
+    };
+    if (media) { body.type = media.type; body.file_id = media.file_id; body.file_name = media.name || ''; body.caption = msg.caption || ''; }
+    const r = await fetch(INGEST_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    dbg({ sid: body.subscriber_id, media: media && media.type, textLen: text.length, ingest_status: r.status });
+  } catch (e) { dbg({ ingest_error: e.message }); console.error('[ingest] failed:', e.message); }
 }
 
 app.post('/tg/:secret', async (req, res) => {
@@ -92,7 +89,7 @@ app.post('/tg/:secret', async (req, res) => {
   }
 
   // 2) best-effort media pull (don't block the response on it)
-  sendMediaToSetter(update);
+  sendToSetter(update);
 
   // only 200 when ManyChat accepted it; else 502 so Telegram retries (no lost messages)
   if (mcOk) return res.json({ ok: true });
